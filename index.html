@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mining Globe — African Mining Projects</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.125/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        #globe { width: 100%; height: 100%; }
+
+        #top-bar {
+            position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px 16px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+        }
+        #top-bar select, #top-bar input {
+            padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(0,0,0,0.6); color: #fff; font-size: 13px; outline: none;
+        }
+        #top-bar select option { background: #222; }
+        #top-bar input::placeholder { color: rgba(255,255,255,0.5); }
+        #top-bar .label { color: rgba(255,255,255,0.6); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+        #clear-btn {
+            padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1); color: #fff; font-size: 12px; cursor: pointer;
+        }
+        #clear-btn:hover { background: rgba(255,255,255,0.2); }
+
+        #stats-badge {
+            position: absolute; bottom: 40px; left: 16px; z-index: 10;
+            padding: 8px 14px; background: rgba(0,0,0,0.7); color: #fff;
+            border-radius: 8px; font-size: 13px; font-family: monospace;
+        }
+
+        #legend {
+            position: absolute; bottom: 40px; right: 16px; z-index: 10;
+            background: rgba(0,0,0,0.75); border-radius: 8px; padding: 10px 14px;
+            max-height: 50vh; overflow-y: auto;
+        }
+        #legend .title { color: #fff; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; }
+        .legend-item:hover { opacity: 0.8; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .legend-label { color: #ccc; font-size: 11px; white-space: nowrap; }
+        .legend-count { color: #888; font-size: 10px; margin-left: auto; }
+
+        #detail-panel {
+            position: absolute; top: 60px; right: 16px; z-index: 10;
+            width: 340px; max-height: calc(100vh - 120px); overflow-y: auto;
+            background: rgba(15,15,20,0.92); border-radius: 12px;
+            padding: 20px; display: none; backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        #detail-panel.active { display: block; }
+        #detail-close {
+            position: absolute; top: 10px; right: 12px;
+            background: none; border: none; color: #888; font-size: 20px; cursor: pointer;
+        }
+        #detail-close:hover { color: #fff; }
+        .detail-name { color: #fff; font-size: 18px; font-weight: 600; margin-bottom: 4px; padding-right: 30px; }
+        .detail-commodity {
+            display: inline-block; padding: 3px 10px; border-radius: 12px;
+            font-size: 11px; font-weight: 600; color: #fff; margin-bottom: 12px;
+        }
+        .detail-divider { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0; }
+        .detail-row { display: flex; padding: 4px 0; }
+        .detail-label { color: #888; font-size: 12px; width: 90px; flex-shrink: 0; }
+        .detail-value { color: #ddd; font-size: 12px; flex: 1; }
+        .detail-value a { color: #6cb4ee; text-decoration: none; }
+        .detail-value a:hover { text-decoration: underline; }
+        .detail-notes { color: #aaa; font-size: 11px; margin-top: 10px; font-style: italic; line-height: 1.4; }
+        .detail-status {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 11px; font-weight: 500;
+        }
+        .status-producing { background: rgba(39,174,96,0.2); color: #27ae60; }
+        .status-construction { background: rgba(241,196,15,0.2); color: #f1c40f; }
+        .status-suspended { background: rgba(231,76,60,0.2); color: #e74c3c; }
+        .status-care { background: rgba(155,89,182,0.2); color: #9b59b6; }
+        .status-other { background: rgba(149,165,166,0.2); color: #95a5a6; }
+    </style>
+</head>
+<body>
+    <div id="globe"></div>
+
+    <div id="top-bar">
+        <span class="label">Commodity</span>
+        <select id="filter-commodity"><option value="">All</option></select>
+        <span class="label">Country</span>
+        <select id="filter-country"><option value="">All</option></select>
+        <input id="filter-search" type="text" placeholder="Search mine, company, ticker..." style="width: 200px;">
+        <button id="clear-btn">Clear</button>
+    </div>
+
+    <div id="stats-badge">Loading...</div>
+
+    <div id="legend"><div class="title">Commodities</div></div>
+
+    <div id="detail-panel">
+        <button id="detail-close">&times;</button>
+        <div class="detail-name" id="d-name"></div>
+        <div class="detail-commodity" id="d-commodity"></div>
+        <hr class="detail-divider">
+        <div class="detail-row"><span class="detail-label">Country</span><span class="detail-value" id="d-country"></span></div>
+        <div class="detail-row"><span class="detail-label">Operator</span><span class="detail-value" id="d-operator"></span></div>
+        <div class="detail-row"><span class="detail-label">Owner</span><span class="detail-value" id="d-owner"></span></div>
+        <div class="detail-row"><span class="detail-label">Ticker</span><span class="detail-value" id="d-ticker"></span></div>
+        <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value" id="d-type"></span></div>
+        <div class="detail-row"><span class="detail-label">Production</span><span class="detail-value" id="d-production"></span></div>
+        <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value" id="d-status"></span></div>
+        <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value" id="d-location"></span></div>
+        <div class="detail-notes" id="d-notes"></div>
+    </div>
+
+    <script>
+        // --- Commodity colors ---
+        const COLORS = {
+            "GOLD": "#FFD700", "COPPER": "#B87333", "COPPER/COBALT": "#B87333",
+            "PGMS": "#9B59B6", "DIAMONDS": "#00CED1", "IRON ORE": "#C0392B",
+            "PHOSPHATE": "#DA70D6", "COAL": "#566573", "MANGANESE": "#6C3483",
+            "ZINC": "#4682B4", "ZINC/LEAD": "#4682B4", "ZINC/LEAD/COPPER": "#4682B4",
+            "LITHIUM": "#32CD32", "URANIUM": "#ADFF2F", "TIN": "#BDC3C7",
+            "TIN/LITHIUM": "#32CD32", "BAUXITE": "#CD853F", "GRAPHITE": "#36454F",
+            "MINERAL SANDS": "#F4A460", "RARE EARTHS": "#FF6347", "NICKEL": "#8FBC8F",
+            "NICKEL/COBALT": "#8FBC8F", "SILVER": "#C0C0C0", "VANADIUM": "#5F9EA0",
+            "TUNGSTEN": "#696969", "POTASH": "#8B4513", "COBALT": "#0047AB",
+            "ALUMINIUM": "#A9A9A9", "COPPER/ZINC/GOLD": "#B87333", "COPPER/GOLD": "#B87333",
+            "COPPER/ZINC": "#B87333", "LEAD/ZINC/SILVER": "#4682B4",
+            "PGMS/NICKEL/COPPER": "#9B59B6", "PHOSPHATE/IRON ORE/RARE EARTHS": "#DA70D6",
+        };
+        const DEFAULT_COLOR = "#888888";
+
+        function getColor(commodity) {
+            if (!commodity) return DEFAULT_COLOR;
+            return COLORS[commodity.toUpperCase()] || DEFAULT_COLOR;
+        }
+
+        function getStatusClass(status) {
+            if (!status) return "status-other";
+            const s = status.toLowerCase();
+            if (s.includes("producing")) return "status-producing";
+            if (s.includes("construction") || s.includes("commissioning")) return "status-construction";
+            if (s.includes("suspended")) return "status-suspended";
+            if (s.includes("care") || s.includes("maintenance")) return "status-care";
+            return "status-other";
+        }
+
+        function getPinSize(status) {
+            if (!status) return 8;
+            const s = status.toLowerCase();
+            if (s.includes("producing")) return 10;
+            if (s.includes("construction")) return 8;
+            return 6;
+        }
+
+        // --- Globe ---
+        Cesium.Ion.defaultAccessToken = "{{CESIUM_ION_TOKEN}}";
+
+        const viewer = new Cesium.Viewer("globe", {
+            terrain: Cesium.Terrain.fromWorldTerrain(),
+            baseLayerPicker: false, geocoder: false, homeButton: false,
+            navigationHelpButton: false, sceneModePicker: false,
+            timeline: false, animation: false, fullscreenButton: false,
+            selectionIndicator: false, infoBox: false,
+        });
+
+        // Start centered on Africa
+        viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(20, 0, 20000000),
+        });
+
+        const dataSource = new Cesium.CustomDataSource("mines");
+        viewer.dataSources.add(dataSource);
+        dataSource.clustering.enabled = true;
+        dataSource.clustering.pixelRange = 40;
+        dataSource.clustering.minimumClusterSize = 3;
+
+        dataSource.clustering.clusterEvent.addEventListener(function(clusteredEntities, cluster) {
+            cluster.label.show = true;
+            cluster.label.text = clusteredEntities.length.toString();
+            cluster.label.font = "bold 13px sans-serif";
+            cluster.label.fillColor = Cesium.Color.WHITE;
+            cluster.label.outlineColor = Cesium.Color.BLACK;
+            cluster.label.outlineWidth = 2;
+            cluster.label.style = Cesium.LabelStyle.FILL_AND_OUTLINE;
+            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+            cluster.billboard.show = true;
+            cluster.billboard.color = Cesium.Color.fromCssColorString("#555");
+            const size = 28 + Math.min(clusteredEntities.length * 0.5, 20);
+            cluster.billboard.width = size;
+            cluster.billboard.height = size;
+        });
+
+        // --- State ---
+        let allMines = [];
+        let commodityCounts = {};
+
+        // --- Load data ---
+        async function loadMines() {
+            const params = new URLSearchParams();
+            const commodity = document.getElementById("filter-commodity").value;
+            const country = document.getElementById("filter-country").value;
+            const search = document.getElementById("filter-search").value.trim();
+
+            if (commodity) params.set("commodity", commodity);
+            if (country) params.set("country", country);
+            if (search) params.set("search", search);
+
+            const res = await fetch("/api/mines?" + params.toString());
+            allMines = await res.json();
+
+            renderPins(allMines);
+            updateStats(allMines);
+        }
+
+        function renderPins(mines) {
+            dataSource.entities.removeAll();
+            commodityCounts = {};
+
+            mines.forEach(function(m) {
+                const color = getColor(m.commodity);
+                const size = getPinSize(m.status);
+                const comm = m.commodity || "Other";
+
+                commodityCounts[comm] = (commodityCounts[comm] || 0) + 1;
+
+                dataSource.entities.add({
+                    position: Cesium.Cartesian3.fromDegrees(m.lon, m.lat),
+                    point: {
+                        pixelSize: size,
+                        color: Cesium.Color.fromCssColorString(color),
+                        outlineColor: Cesium.Color.WHITE,
+                        outlineWidth: 1.5,
+                        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                    },
+                    properties: m,
+                });
+            });
+
+            renderLegend();
+        }
+
+        function renderLegend() {
+            const legend = document.getElementById("legend");
+            legend.innerHTML = '<div class="title">Commodities</div>';
+
+            const sorted = Object.entries(commodityCounts).sort((a, b) => b[1] - a[1]);
+            sorted.forEach(function([comm, count]) {
+                const color = getColor(comm);
+                const item = document.createElement("div");
+                item.className = "legend-item";
+                item.innerHTML = '<div class="legend-dot" style="background:' + color + '"></div>' +
+                    '<span class="legend-label">' + comm + '</span>' +
+                    '<span class="legend-count">' + count + '</span>';
+                item.addEventListener("click", function() {
+                    document.getElementById("filter-commodity").value = comm;
+                    loadMines();
+                });
+                legend.appendChild(item);
+            });
+        }
+
+        function updateStats(mines) {
+            const countries = new Set(mines.map(m => m.country)).size;
+            document.getElementById("stats-badge").textContent =
+                mines.length + " mines across " + countries + " countries";
+        }
+
+        // --- Pin click ---
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction(function(click) {
+            const picked = viewer.scene.pick(click.position);
+            if (Cesium.defined(picked) && picked.id && picked.id.properties) {
+                const p = picked.id.properties;
+                const m = {};
+                // Extract all properties
+                for (const key of ["mine_name", "commodity", "country", "operator", "owning_company",
+                    "ticker", "exchange", "mine_type", "annual_production", "status", "location", "notes"]) {
+                    try { m[key] = p[key].getValue(); } catch(e) { m[key] = ""; }
+                }
+                showDetail(m);
+            }
+        }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        function showDetail(m) {
+            document.getElementById("d-name").textContent = m.mine_name || "";
+            const commEl = document.getElementById("d-commodity");
+            commEl.textContent = m.commodity || "";
+            commEl.style.background = getColor(m.commodity);
+            document.getElementById("d-country").textContent = m.country || "";
+            document.getElementById("d-operator").textContent = m.operator || "";
+            document.getElementById("d-owner").textContent = m.owning_company || "";
+
+            const ticker = m.ticker || "";
+            const exchange = m.exchange || "";
+            const tickerEl = document.getElementById("d-ticker");
+            if (ticker && ticker !== "Private" && ticker !== "State" && ticker !== "\u2014") {
+                tickerEl.innerHTML = '<strong>' + ticker + '</strong>' + (exchange ? ' (' + exchange + ')' : '');
+            } else {
+                tickerEl.textContent = ticker || "\u2014";
+            }
+
+            document.getElementById("d-type").textContent = m.mine_type || "\u2014";
+            document.getElementById("d-production").textContent = m.annual_production || "\u2014";
+
+            const statusEl = document.getElementById("d-status");
+            statusEl.innerHTML = '<span class="detail-status ' + getStatusClass(m.status) + '">' + (m.status || "\u2014") + '</span>';
+
+            document.getElementById("d-location").textContent = m.location || "\u2014";
+
+            const notesEl = document.getElementById("d-notes");
+            notesEl.textContent = m.notes || "";
+            notesEl.style.display = m.notes ? "block" : "none";
+
+            document.getElementById("detail-panel").classList.add("active");
+            document.getElementById("legend").style.display = "none";
+        }
+
+        document.getElementById("detail-close").addEventListener("click", function() {
+            document.getElementById("detail-panel").classList.remove("active");
+            document.getElementById("legend").style.display = "";
+        });
+
+        // --- Filters ---
+        async function initFilters() {
+            const res = await fetch("/api/stats");
+            const stats = await res.json();
+
+            const commSelect = document.getElementById("filter-commodity");
+            stats.commodity_list.forEach(function(c) {
+                const opt = document.createElement("option");
+                opt.value = c; opt.textContent = c;
+                commSelect.appendChild(opt);
+            });
+
+            const countrySelect = document.getElementById("filter-country");
+            stats.country_list.forEach(function(c) {
+                const opt = document.createElement("option");
+                opt.value = c; opt.textContent = c;
+                countrySelect.appendChild(opt);
+            });
+        }
+
+        document.getElementById("filter-commodity").addEventListener("change", loadMines);
+        document.getElementById("filter-country").addEventListener("change", loadMines);
+
+        let searchTimer;
+        document.getElementById("filter-search").addEventListener("input", function() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(loadMines, 400);
+        });
+
+        document.getElementById("clear-btn").addEventListener("click", function() {
+            document.getElementById("filter-commodity").value = "";
+            document.getElementById("filter-country").value = "";
+            document.getElementById("filter-search").value = "";
+            loadMines();
+        });
+
+        // Close detail on Escape
+        document.addEventListener("keydown", function(e) {
+            if (e.key === "Escape") {
+                document.getElementById("detail-panel").classList.remove("active");
+                document.getElementById("legend").style.display = "";
+            }
+        });
+
+        // --- Init ---
+        initFilters().then(loadMines);
+    </script>
+</body>
+</html>
