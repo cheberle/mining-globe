@@ -8,3 +8,4 @@
 - CesiumJS 1.125 for 3D globe
 - FastAPI + SQLite backend
 - Data imported from african_mining_final.xlsx
+# Thu Apr  2 09:30:01 CEST 2026
