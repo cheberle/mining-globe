@@ -8,7 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY index.html .
 COPY mines.db .
-COPY .env .
 
 ENV PORT=8001
 EXPOSE 8001
