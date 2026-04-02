@@ -2,9 +2,9 @@
 """FastAPI server for Mining Globe."""
 
 import os
-import sqlite3
 from pathlib import Path
 
+import openpyxl
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,13 +15,58 @@ load_dotenv()
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-DB_PATH = "mines.db"
+MINES = []
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def load_xlsx():
+    wb = openpyxl.load_workbook("mines.xlsx", read_only=True, data_only=True)
+    mines = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        country = sheet_name
+        current_commodity = None
+
+        for row in ws.iter_rows(values_only=True):
+            if not row or len(row) < 2 or not row[0]:
+                continue
+            first = str(row[0]).strip()
+            if "No active" in first:
+                break
+            if first.upper() == first and "(" in first:
+                current_commodity = first.split("(")[0].split("\u2014")[0].split("\u2013")[0].strip()
+                continue
+            if first == "Mine Name":
+                continue
+            if row[1]:
+                lat = row[10] if len(row) > 10 and isinstance(row[10], (int, float)) else None
+                lon = row[11] if len(row) > 11 and isinstance(row[11], (int, float)) else None
+                if lat is None or lon is None:
+                    continue
+                mines.append({
+                    "country": country,
+                    "mine_name": first,
+                    "commodity": current_commodity,
+                    "operator": str(row[1] or ""),
+                    "owning_company": str(row[2] or "") if len(row) > 2 else "",
+                    "ticker": str(row[3] or "") if len(row) > 3 else "",
+                    "exchange": str(row[4] or "") if len(row) > 4 else "",
+                    "mine_type": str(row[5] or "") if len(row) > 5 else "",
+                    "annual_production": str(row[6] or "") if len(row) > 6 else "",
+                    "status": str(row[7] or "") if len(row) > 7 else "",
+                    "location": str(row[8] or "") if len(row) > 8 else "",
+                    "notes": str(row[9] or "") if len(row) > 9 else "",
+                    "lat": lat,
+                    "lon": lon,
+                })
+    wb.close()
+    return mines
+
+
+@app.on_event("startup")
+def startup():
+    global MINES
+    MINES = load_xlsx()
+    print(f"Loaded {len(MINES)} mines")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -38,41 +83,29 @@ def get_mines(
     status: str = Query(default=None),
     search: str = Query(default=None),
 ):
-    conn = get_db()
-    query = "SELECT * FROM mines WHERE lat IS NOT NULL"
-    params = []
-
+    results = MINES
     if commodity:
-        query += " AND commodity LIKE ?"
-        params.append(f"%{commodity}%")
+        c = commodity.upper()
+        results = [m for m in results if m["commodity"] and c in m["commodity"].upper()]
     if country:
-        query += " AND country = ?"
-        params.append(country)
+        results = [m for m in results if m["country"] == country]
     if status:
-        query += " AND status = ?"
-        params.append(status)
+        results = [m for m in results if m["status"] == status]
     if search:
-        query += " AND (mine_name LIKE ? OR operator LIKE ? OR owning_company LIKE ? OR ticker LIKE ?)"
-        params.extend([f"%{search}%"] * 4)
-
-    rows = conn.execute(query, params).fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+        s = search.lower()
+        results = [m for m in results if s in m["mine_name"].lower() or s in m["operator"].lower() or s in m["owning_company"].lower() or s in m["ticker"].lower()]
+    return results
 
 
 @app.get("/api/stats")
 def get_stats():
-    conn = get_db()
-    total = conn.execute("SELECT COUNT(*) as c FROM mines WHERE lat IS NOT NULL").fetchone()["c"]
-    countries = conn.execute("SELECT COUNT(DISTINCT country) as c FROM mines WHERE lat IS NOT NULL").fetchone()["c"]
-    commodities = conn.execute("SELECT DISTINCT commodity FROM mines WHERE lat IS NOT NULL AND commodity IS NOT NULL ORDER BY commodity").fetchall()
-    country_list = conn.execute("SELECT DISTINCT country FROM mines WHERE lat IS NOT NULL ORDER BY country").fetchall()
-    conn.close()
+    commodities = sorted(set(m["commodity"] for m in MINES if m["commodity"]))
+    countries = sorted(set(m["country"] for m in MINES))
     return {
-        "total_mines": total,
-        "countries": countries,
-        "commodity_list": [r["commodity"] for r in commodities],
-        "country_list": [r["country"] for r in country_list],
+        "total_mines": len(MINES),
+        "countries": len(countries),
+        "commodity_list": commodities,
+        "country_list": countries,
     }
 
 
